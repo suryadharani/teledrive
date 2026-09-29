@@ -7,15 +7,16 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# Build and dependencies
+node_modules/
+dist/
+dist-ssr/
 *.local
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
 *.suo
 *.ntvs*
@@ -25,26 +26,36 @@ dist-ssr
 
 # Environment & Secrets (NEVER COMMIT)
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
 
 # Telegram Secrets, Sessions & Companion data (NEVER COMMIT)
 *.session
 *.session-journal
+*.session*
+sessions/
+backend/sessions/
+backend/*.session
+backend/*.session-journal
 telegram_creds.json
 telegram_session.string
-service-account*.json
-firebase-adminsdk*.json
-credentials.json
-backend/.env
-backend/*.session
-backend/sessions/
 
-# Python virtual environment & local testing data
+# Firebase & Cloud Private Credentials (NEVER COMMIT)
+*serviceAccount*.json
+*service-account*.json
+*firebase-adminsdk*.json
+credentials.json
+*.pem
+*.key
+
+# Python virtual environment & local companion data
 .venv/
 backend/.venv/
+data/
 backend/data/
 __pycache__/
+backend/__pycache__/
 *.py[cod]

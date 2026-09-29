@@ -84,6 +84,7 @@ export const FileGrid: React.FC<FileGridProps> = ({
                   <div className="folder-count">{formatDate(folder.updatedAt)}</div>
                 </div>
                 <button
+                  className="btn-fav-folder"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: folder.isFavorite ? '#f59e0b' : 'var(--text-dim)' }}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -125,6 +126,7 @@ export const FileGrid: React.FC<FileGridProps> = ({
                 <div className="file-card-preview">
                   {getFileIcon(file.mimeType, file.name)}
                   <button
+                    className="btn-fav-file"
                     style={{
                       position: 'absolute',
                       top: '8px',

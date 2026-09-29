@@ -51,7 +51,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <nav className="nav-menu">
         <button
           className={`nav-item ${currentSection === 'drive' ? 'active' : ''}`}
-          onClick={() => onSelectSection('drive')}
+          id="nav-my-drive" onClick={() => onSelectSection('drive')}
         >
           <HardDrive size={18} />
           <span>My Drive</span>
@@ -59,7 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <button
           className={`nav-item ${currentSection === 'recent' ? 'active' : ''}`}
-          onClick={() => onSelectSection('recent')}
+          id="nav-recent" onClick={() => onSelectSection('recent')}
         >
           <Clock size={18} />
           <span>Recent</span>
@@ -67,7 +67,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <button
           className={`nav-item ${currentSection === 'favorites' ? 'active' : ''}`}
-          onClick={() => onSelectSection('favorites')}
+          id="nav-favorites" onClick={() => onSelectSection('favorites')}
         >
           <Star size={18} />
           <span>Favorites</span>
@@ -75,7 +75,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <button
           className={`nav-item ${currentSection === 'trash' ? 'active' : ''}`}
-          onClick={() => onSelectSection('trash')}
+          id="nav-trash" onClick={() => onSelectSection('trash')}
         >
           <Trash2 size={18} />
           <span>Trash</span>
@@ -85,7 +85,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <button
           className={`nav-item ${currentSection === 'settings' ? 'active' : ''}`}
-          onClick={() => onSelectSection('settings')}
+          id="nav-settings" onClick={() => onSelectSection('settings')}
         >
           <Settings size={18} />
           <span>Settings</span>

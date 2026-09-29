@@ -73,6 +73,7 @@ export const FileList: React.FC<FileListProps> = ({
             >
               <td>
                 <button
+                  className="btn-fav-folder"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: folder.isFavorite ? '#f59e0b' : 'var(--text-dim)' }}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -108,6 +109,7 @@ export const FileList: React.FC<FileListProps> = ({
             >
               <td>
                 <button
+                  className="btn-fav-file"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: file.isFavorite ? '#f59e0b' : 'var(--text-dim)' }}
                   onClick={(e) => {
                     e.stopPropagation();

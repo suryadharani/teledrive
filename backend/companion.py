@@ -79,12 +79,14 @@ async def cors_middleware(request: Request, handler):
         resp.headers['Access-Control-Allow-Origin'] = '*'
         resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, DELETE, OPTIONS'
         resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+        resp.headers['Access-Control-Allow-Private-Network'] = 'true'
         return resp
 
     resp = await handler(request)
     resp.headers['Access-Control-Allow-Origin'] = '*'
     resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, DELETE, OPTIONS'
     resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+    resp.headers['Access-Control-Allow-Private-Network'] = 'true'
     return resp
 
 # ================= Routes =================
@@ -333,6 +335,7 @@ async def handle_download(request: Request):
                 'Access-Control-Allow-Origin': '*',
                 'Access-Control-Allow-Methods': 'GET, OPTIONS',
                 'Access-Control-Allow-Headers': '*',
+                'Access-Control-Allow-Private-Network': 'true',
                 'Content-Type': mime_type,
                 'Content-Length': str(file_size),
                 'Content-Disposition': f'attachment; filename="{filename}"'

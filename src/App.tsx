@@ -728,7 +728,7 @@ export function App() {
       {/* Toast Notifications */}
       <div className="toast-container">
         {toasts.map(toast => (
-          <div key={toast.id} className="toast">
+          <div key={toast.id} className={`toast toast-${toast.type}`}>
             {toast.type === 'success' && <CheckCircle size={16} color="#10b981" />}
             {toast.type === 'info' && <Info size={16} color="#3b82f6" />}
             {toast.type === 'error' && <AlertCircle size={16} color="#ef4444" />}

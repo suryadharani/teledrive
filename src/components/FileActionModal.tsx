@@ -59,7 +59,7 @@ export const FileActionModal: React.FC<FileActionModalProps> = ({
               {file.name}
             </h3>
           </div>
-          <button className="btn-icon" onClick={onClose}>
+          <button id="btn-modal-close" className="btn-icon" onClick={onClose}>
             <X size={18} />
           </button>
         </div>
@@ -135,11 +135,12 @@ export const FileActionModal: React.FC<FileActionModalProps> = ({
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '10px' }}>
           {file.isTrash ? (
             <>
-              <button className="btn btn-secondary" onClick={() => onRestore(file)}>
+              <button id="btn-modal-restore" className="btn btn-secondary" onClick={() => onRestore(file)}>
                 <RotateCcw size={16} />
                 <span>Restore File</span>
               </button>
               <button
+                id="btn-modal-permanent-delete"
                 className="btn btn-secondary"
                 style={{ borderColor: 'rgba(239, 68, 68, 0.4)', color: '#ef4444' }}
                 onClick={() => onPermanentDelete(file)}
@@ -151,6 +152,7 @@ export const FileActionModal: React.FC<FileActionModalProps> = ({
           ) : (
             <>
               <button
+                id="btn-modal-trash"
                 className="btn btn-secondary"
                 style={{ color: '#ef4444' }}
                 onClick={() => onMoveToTrash(file)}
@@ -158,7 +160,7 @@ export const FileActionModal: React.FC<FileActionModalProps> = ({
                 <Trash2 size={16} />
                 <span>Move to Trash</span>
               </button>
-              <button className="btn btn-primary" onClick={() => onDownload(file)}>
+              <button id="btn-modal-download" className="btn btn-primary" onClick={() => onDownload(file)}>
                 <Download size={16} />
                 <span>Download File</span>
               </button>

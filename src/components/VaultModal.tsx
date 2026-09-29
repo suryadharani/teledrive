@@ -155,6 +155,7 @@ export const VaultModal: React.FC<VaultModalProps> = ({
               </label>
               <div style={{ position: 'relative' }}>
                 <input
+                  id="vault-passphrase-input"
                   type={showPassword ? 'text' : 'password'}
                   autoFocus
                   required
