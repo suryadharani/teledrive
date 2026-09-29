@@ -330,6 +330,9 @@ async def handle_download(request: Request):
         response = StreamResponse(
             status=200,
             headers={
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, OPTIONS',
+                'Access-Control-Allow-Headers': '*',
                 'Content-Type': mime_type,
                 'Content-Length': str(file_size),
                 'Content-Disposition': f'attachment; filename="{filename}"'
