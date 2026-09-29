@@ -41,3 +41,10 @@ credentials.json
 backend/.env
 backend/*.session
 backend/sessions/
+
+# Python virtual environment & local testing data
+.venv/
+backend/.venv/
+backend/data/
+__pycache__/
+*.py[cod]

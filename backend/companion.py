@@ -1,192 +1,422 @@
 #!/usr/bin/env python3
 """
-TeleDrive Local Companion Daemon
-================================
-Runs locally on your Mac at http://127.0.0.1:8765.
-Bridges the TeleDrive frontend to Telegram (Bot API or MTProto)
-without EVER exposing Telegram tokens, api_id, api_hash, or session keys
-to the frontend or GitHub repository.
-
-Requirements:
-    pip install requests urllib3 (standard python3 included)
-Optional for direct Telegram Bot API:
-    export TELEGRAM_BOT_TOKEN="your_bot_token"
-    export TELEGRAM_CHAT_ID="your_channel_or_chat_id"
+TeleDrive Local Companion Daemon (MTProto Engine)
+================================================
+Runs on http://127.0.0.1:8765 on your Mac.
+Bridges TeleDrive frontend directly to Telegram via MTProto (Telethon).
+All Telegram credentials, API keys, and session files remain strictly local.
+Supports streaming uploads and downloads for large files.
 """
 
 import os
 import sys
 import json
-import uuid
-import mimetypes
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import urllib.parse
+import hashlib
+import asyncio
+from pathlib import Path
+from dotenv import load_dotenv
+from aiohttp import web
+from aiohttp.web import Request, Response, StreamResponse
 
-PORT = int(os.environ.get('PORT', 8765))
-BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
-os.makedirs(DATA_DIR, exist_ok=True)
+try:
+    from telethon import TelegramClient
+    from telethon.tl.types import Channel, Chat
+except ImportError:
+    print("❌ Error: Telethon is not installed.")
+    print("Run: source backend/.venv/bin/activate && pip install -r backend/requirements.txt")
+    sys.exit(1)
 
-class CompanionHandler(BaseHTTPRequestHandler):
-    def _send_cors_headers(self):
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+BASE_DIR = Path(__file__).parent.resolve()
+ENV_FILE = BASE_DIR / '.env'
+SESSIONS_DIR = BASE_DIR / 'sessions'
+SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+SESSION_FILE = SESSIONS_DIR / 'teledrive'
+DATA_DIR = BASE_DIR / 'data'
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    def do_OPTIONS(self):
-        self.send_response(204)
-        self._send_cors_headers()
-        self.end_headers()
+load_dotenv(ENV_FILE)
 
-    def do_GET(self):
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path
+PORT = int(os.getenv('PORT', 8765))
+API_ID_STR = os.getenv('TELEGRAM_API_ID')
+API_HASH = os.getenv('TELEGRAM_API_HASH')
+CHANNEL_ID_STR = os.getenv('TELEGRAM_CHANNEL_ID')
 
-        if path == '/health':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self._send_cors_headers()
-            self.end_headers()
-            mode = "telegram_live" if (BOT_TOKEN and CHAT_ID) else "local_mac_staging"
-            resp = {
-                "status": "ok",
-                "mode": mode,
-                "telegramConfigured": bool(BOT_TOKEN and CHAT_ID),
-                "storagePath": DATA_DIR,
-                "version": "1.0.0"
-            }
-            self.wfile.write(json.dumps(resp).encode('utf-8'))
-            return
+client: TelegramClient = None
+phone_code_hash_cache = {}
 
-        if path.startswith('/api/download/'):
-            file_id = path.replace('/api/download/', '')
-            file_path = os.path.join(DATA_DIR, file_id)
-            if os.path.exists(file_path):
-                self.send_response(200)
-                mime, _ = mimetypes.guess_type(file_path)
-                self.send_header('Content-Type', mime or 'application/octet-stream')
-                self.send_header('Content-Length', str(os.path.getsize(file_path)))
-                self._send_cors_headers()
-                self.end_headers()
-                with open(file_path, 'rb') as f:
-                    while chunk := f.read(65536):
-                        self.wfile.write(chunk)
-                return
-            else:
-                self.send_response(404)
-                self._send_cors_headers()
-                self.end_headers()
-                self.wfile.write(b'{"error": "File not found"}')
-                return
+def get_channel_target():
+    ch = os.getenv('TELEGRAM_CHANNEL_ID')
+    if not ch:
+        return None
+    ch = ch.strip()
+    if ch.startswith('-') or ch.isdigit():
+        return int(ch)
+    return ch
 
-        if path.startswith('/api/verify/'):
-            file_id = path.replace('/api/verify/', '')
-            file_path = os.path.join(DATA_DIR, file_id)
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self._send_cors_headers()
-            self.end_headers()
-            exists = os.path.exists(file_path)
-            self.wfile.write(json.dumps({"exists": exists}).encode('utf-8'))
-            return
+async def init_telethon_client():
+    global client
+    api_id_val = os.getenv('TELEGRAM_API_ID')
+    api_hash_val = os.getenv('TELEGRAM_API_HASH')
 
-        self.send_response(404)
-        self._send_cors_headers()
-        self.end_headers()
+    if not api_id_val or not api_hash_val or api_id_val == '12345678':
+        print("⚠️  Warning: TELEGRAM_API_ID / TELEGRAM_API_HASH not set in backend/.env")
+        print("Run `python3 backend/login.py` to configure and log in.")
+        return None
 
-    def do_POST(self):
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path
-
-        if path == '/api/upload':
-            content_type = self.headers.get('Content-Type', '')
-            if not content_type.startswith('multipart/form-data'):
-                self.send_response(400)
-                self._send_cors_headers()
-                self.end_headers()
-                self.wfile.write(b'{"error": "Expected multipart/form-data"}')
-                return
-
-            try:
-                import cgi
-                form = cgi.FieldStorage(
-                    fp=self.rfile,
-                    headers=self.headers,
-                    environ={'REQUEST_METHOD': 'POST', 'CONTENT_TYPE': content_type}
-                )
-
-                if 'file' not in form:
-                    self.send_response(400)
-                    self._send_cors_headers()
-                    self.end_headers()
-                    self.wfile.write(b'{"error": "No file field in upload"}')
-                    return
-
-                file_item = form['file']
-                original_name = file_item.filename or 'unnamed_file'
-                sha256 = form.getvalue('sha256', '')
-                file_id = f"tg_{uuid.uuid4().hex[:12]}_{original_name}"
-                dest_path = os.path.join(DATA_DIR, file_id)
-
-                with open(dest_path, 'wb') as f:
-                    while chunk := file_item.file.read(65536):
-                        f.write(chunk)
-
-                # Return response to frontend
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self._send_cors_headers()
-                self.end_headers()
-
-                resp = {
-                    "status": "ok",
-                    "fileId": file_id,
-                    "chatId": CHAT_ID or "local_mac_storage",
-                    "messageId": int(uuid.uuid4().int % 1000000),
-                    "originalName": original_name,
-                    "sha256": sha256
-                }
-                self.wfile.write(json.dumps(resp).encode('utf-8'))
-            except Exception as e:
-                self.send_response(500)
-                self._send_cors_headers()
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
-            return
-
-        self.send_response(404)
-        self._send_cors_headers()
-        self.end_headers()
-
-    def do_DELETE(self):
-        parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path
-        if path.startswith('/api/delete/'):
-            msg_id = path.replace('/api/delete/', '')
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self._send_cors_headers()
-            self.end_headers()
-            self.wfile.write(json.dumps({"success": True, "deletedMessageId": msg_id}).encode('utf-8'))
-            return
-
-        self.send_response(404)
-        self._send_cors_headers()
-        self.end_headers()
-
-def run_server():
-    server = HTTPServer(('127.0.0.1', PORT), CompanionHandler)
-    print(f"=====================================================")
-    print(f"TeleDrive Local Companion Daemon running at:")
-    print(f"http://127.0.0.1:{PORT}")
-    print(f"Status: Ready to bridge TeleDrive to Telegram storage")
-    print(f"=====================================================")
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nShutting down TeleDrive Companion...")
-        server.server_close()
+        client = TelegramClient(str(SESSION_FILE), int(api_id_val), api_hash_val)
+        await client.connect()
+        return client
+    except Exception as e:
+        print(f"❌ Error connecting Telethon client: {e}")
+        return None
+
+# ================= CORS Middleware =================
+@web.middleware
+async def cors_middleware(request: Request, handler):
+    if request.method == 'OPTIONS':
+        resp = Response(status=204)
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, DELETE, OPTIONS'
+        resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+        return resp
+
+    resp = await handler(request)
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, DELETE, OPTIONS'
+    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+    return resp
+
+# ================= Routes =================
+
+async def handle_health(request: Request):
+    """GET /health - Status check for frontend connectivity"""
+    is_auth = False
+    ch_accessible = False
+
+    if client and client.is_connected():
+        try:
+            is_auth = await client.is_user_authorized()
+            if is_auth:
+                target = get_channel_target()
+                if target:
+                    try:
+                        ent = await client.get_entity(target)
+                        ch_accessible = bool(ent)
+                    except:
+                        ch_accessible = False
+        except:
+            is_auth = False
+
+    return web.json_response({
+        "status": "ok",
+        "engine": "mtproto_telethon",
+        "authenticated": is_auth,
+        "channelAccessible": ch_accessible,
+        "channelConfigured": bool(get_channel_target()),
+        "version": "1.1.0"
+    })
+
+async def handle_status(request: Request):
+    """GET /api/telegram/status - Detailed MTProto status"""
+    if not client:
+        await init_telethon_client()
+
+    if not client or not client.is_connected():
+        return web.json_response({
+            "authenticated": False,
+            "error": "Client not connected. Check backend/.env credentials.",
+            "sessionExists": (SESSION_FILE.with_suffix('.session')).exists()
+        })
+
+    is_auth = await client.is_user_authorized()
+    user_info = None
+    channel_info = None
+
+    if is_auth:
+        me = await client.get_me()
+        user_info = {
+            "id": me.id,
+            "firstName": me.first_name,
+            "lastName": me.last_name,
+            "username": me.username,
+            "phone": me.phone
+        }
+
+        target = get_channel_target()
+        if target:
+            try:
+                entity = await client.get_entity(target)
+                channel_info = {
+                    "id": entity.id,
+                    "title": getattr(entity, 'title', str(entity.id)),
+                    "accessible": True
+                }
+            except Exception as e:
+                channel_info = {
+                    "id": target,
+                    "accessible": False,
+                    "error": str(e)
+                }
+
+    return web.json_response({
+        "authenticated": is_auth,
+        "user": user_info,
+        "channel": channel_info,
+        "sessionExists": (SESSION_FILE.with_suffix('.session')).exists()
+    })
+
+async def handle_auth_start(request: Request):
+    """POST /api/telegram/auth/start - Send SMS/app verification code"""
+    global client
+    if not client:
+        client = await init_telethon_client()
+
+    if not client:
+        return web.json_response({"error": "TELEGRAM_API_ID and TELEGRAM_API_HASH not configured."}, status=400)
+
+    try:
+        data = await request.json()
+        phone = data.get('phone', '').strip()
+        if not phone:
+            return web.json_response({"error": "Phone number is required."}, status=400)
+
+        result = await client.send_code_request(phone)
+        phone_code_hash_cache[phone] = result.phone_code_hash
+
+        return web.json_response({
+            "status": "code_sent",
+            "phone": phone,
+            "message": "Login code sent via Telegram. Please verify."
+        })
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+async def handle_auth_verify(request: Request):
+    """POST /api/telegram/auth/verify - Verify phone code & 2FA"""
+    global client
+    if not client:
+        return web.json_response({"error": "Client not initialized."}, status=400)
+
+    try:
+        data = await request.json()
+        phone = data.get('phone', '').strip()
+        code = data.get('code', '').strip()
+        password = data.get('password', '').strip()
+
+        phone_code_hash = phone_code_hash_cache.get(phone)
+        try:
+            user = await client.sign_in(phone=phone, code=code, phone_code_hash=phone_code_hash)
+        except Exception as e:
+            if '2FA' in str(e) or 'password' in str(e).lower():
+                if password:
+                    user = await client.sign_in(password=password)
+                else:
+                    return web.json_response({"status": "2fa_required", "message": "2FA password required"}, status=401)
+            else:
+                raise e
+
+        me = await client.get_me()
+        return web.json_response({
+            "status": "authenticated",
+            "user": {
+                "id": me.id,
+                "firstName": me.first_name,
+                "username": me.username
+            }
+        })
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=400)
+
+async def handle_upload(request: Request):
+    """POST /api/upload - Stream file upload directly to Telegram Channel via MTProto"""
+    if not client or not await client.is_user_authorized():
+        return web.json_response({"error": "Telegram client not authorized. Run python3 backend/login.py"}, status=401)
+
+    target = get_channel_target()
+    if not target:
+        return web.json_response({"error": "No TELEGRAM_CHANNEL_ID configured in backend/.env"}, status=400)
+
+    try:
+        channel_entity = await client.get_entity(target)
+    except Exception as e:
+        return web.json_response({"error": f"Cannot access channel {target}: {e}"}, status=400)
+
+    # Process multipart stream without buffering excessive memory
+    reader = await request.multipart()
+    file_field = None
+    sha256_provided = ''
+
+    while True:
+        part = await reader.next()
+        if part is None:
+            break
+        if part.name == 'sha256':
+            sha256_provided = (await part.text()).strip()
+        elif part.name == 'file':
+            filename = part.filename or 'unnamed_file'
+            temp_path = DATA_DIR / f"temp_upload_{os.urandom(6).hex()}_{filename}"
+
+            hasher = hashlib.sha256()
+            total_bytes = 0
+
+            with open(temp_path, 'wb') as f:
+                while chunk := await part.read_chunk():
+                    f.write(chunk)
+                    hasher.update(chunk)
+                    total_bytes += len(chunk)
+
+            calculated_sha256 = hasher.hexdigest()
+            file_field = {
+                "path": temp_path,
+                "filename": filename,
+                "size": total_bytes,
+                "sha256": sha256_provided or calculated_sha256
+            }
+
+    if not file_field:
+        return web.json_response({"error": "No file included in upload."}, status=400)
+
+    try:
+        # Upload file directly to Telegram channel via Telethon MTProto
+        temp_file_path = file_field["path"]
+        print(f"📤 Uploading '{file_field['filename']}' ({file_field['size']} bytes) to Telegram channel...")
+
+        sent_msg = await client.send_file(
+            channel_entity,
+            str(temp_file_path),
+            caption=f"📁 TeleDrive | {file_field['filename']} | SHA256: {file_field['sha256'][:16]}..."
+        )
+
+        # Cleanup local staging file
+        if temp_file_path.exists():
+            temp_file_path.unlink()
+
+        return web.json_response({
+            "status": "ok",
+            "messageId": sent_msg.id,
+            "fileId": str(sent_msg.id),
+            "chatId": str(channel_entity.id),
+            "sha256": file_field["sha256"],
+            "originalSize": file_field["size"]
+        })
+    except Exception as e:
+        if file_field["path"].exists():
+            file_field["path"].unlink()
+        return web.json_response({"error": f"Telegram MTProto upload failed: {e}"}, status=500)
+
+async def handle_download(request: Request):
+    """GET /api/download/:id - Stream file download directly from Telegram channel"""
+    if not client or not await client.is_user_authorized():
+        return web.json_response({"error": "Telegram client not authorized."}, status=401)
+
+    target = get_channel_target()
+    msg_id_str = request.match_info.get('id')
+
+    try:
+        msg_id = int(msg_id_str)
+        channel_entity = await client.get_entity(target)
+        msg = await client.get_messages(channel_entity, ids=msg_id)
+
+        if not msg or not msg.media or not getattr(msg.media, 'document', None):
+            return web.json_response({"error": "File message not found on Telegram channel."}, status=404)
+
+        doc = msg.media.document
+        filename = getattr(msg.file, 'name', f"file_{msg_id}")
+        mime_type = doc.mime_type or 'application/octet-stream'
+        file_size = doc.size
+
+        # Stream chunked response to browser without loading entire file in RAM
+        response = StreamResponse(
+            status=200,
+            headers={
+                'Content-Type': mime_type,
+                'Content-Length': str(file_size),
+                'Content-Disposition': f'attachment; filename="{filename}"'
+            }
+        )
+        await response.prepare(request)
+
+        async for chunk in client.iter_download(doc, chunk_size=128 * 1024):
+            await response.write(chunk)
+
+        await response.write_eof()
+        return response
+    except Exception as e:
+        return web.json_response({"error": f"Download failed: {e}"}, status=500)
+
+async def handle_verify(request: Request):
+    """POST /api/verify/:id - Verify message & document existence in Telegram channel"""
+    if not client or not await client.is_user_authorized():
+        return web.json_response({"error": "Not authorized."}, status=401)
+
+    target = get_channel_target()
+    msg_id_str = request.match_info.get('id')
+
+    try:
+        msg_id = int(msg_id_str)
+        channel_entity = await client.get_entity(target)
+        msg = await client.get_messages(channel_entity, ids=msg_id)
+
+        if msg and msg.media and getattr(msg.media, 'document', None):
+            return web.json_response({
+                "exists": True,
+                "verified": True,
+                "messageId": msg.id,
+                "size": msg.media.document.size,
+                "filename": getattr(msg.file, 'name', None)
+            })
+        return web.json_response({"exists": False, "verified": False})
+    except Exception as e:
+        return web.json_response({"exists": False, "error": str(e)})
+
+async def handle_delete(request: Request):
+    """DELETE /api/delete/:id - Delete message from Telegram channel"""
+    if not client or not await client.is_user_authorized():
+        return web.json_response({"error": "Not authorized."}, status=401)
+
+    target = get_channel_target()
+    msg_id_str = request.match_info.get('id')
+
+    try:
+        msg_id = int(msg_id_str)
+        channel_entity = await client.get_entity(target)
+        await client.delete_messages(channel_entity, [msg_id])
+        return web.json_response({"success": True, "deletedMessageId": msg_id})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+async def start_server():
+    app = web.Application(middlewares=[cors_middleware])
+    app.router.add_get('/health', handle_health)
+    app.router.add_get('/api/telegram/status', handle_status)
+    app.router.add_post('/api/telegram/auth/start', handle_auth_start)
+    app.router.add_post('/api/telegram/auth/verify', handle_auth_verify)
+    app.router.add_post('/api/upload', handle_upload)
+    app.router.add_get('/api/download/{id}', handle_download)
+    app.router.add_post('/api/verify/{id}', handle_verify)
+    app.router.add_delete('/api/delete/{id}', handle_delete)
+
+    await init_telethon_client()
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '127.0.0.1', PORT)
+    await site.start()
+
+    print("=" * 64)
+    print(f"🚀 TeleDrive MTProto Companion Daemon running at:")
+    print(f"   http://127.0.0.1:{PORT}")
+    print(f"   Storage: Telegram MTProto (Telethon)")
+    print(f"   Session: {SESSION_FILE}.session (Strictly local to your Mac)")
+    print("=" * 64)
+
+    # Keep server running
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == '__main__':
-    run_server()
+    try:
+        asyncio.run(start_server())
+    except (KeyboardInterrupt, SystemExit):
+        print("\nCompanion server stopped.")

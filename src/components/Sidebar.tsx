@@ -100,7 +100,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span style={{ fontWeight: 600 }}>Telegram Storage</span>
           </div>
           <span style={{ fontSize: '0.72rem', color: isMock ? '#fbbf24' : '#34d399' }}>
-            {isMock ? 'Mock Mode' : 'Connected'}
+            {isMock ? 'Mock Mode' : 'MTProto Live'}
           </span>
         </div>
 

@@ -45,9 +45,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           <div className="provider-dot" />
           <span>
-            {activeProviderId === 'mock'
-              ? 'Dev Mock Backend'
-              : 'Local TG Companion'}
+            {activeProviderId === 'mock' ? 'Dev Mock Backend' : activeProviderId === 'telegram' ? 'Telegram MTProto' : 'Local TG Companion'}
           </span>
           <Sliders size={12} style={{ opacity: 0.7 }} />
         </div>

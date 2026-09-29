@@ -1,6 +1,7 @@
 import { IStorageProvider, StorageProviderType } from '../../types';
 import { MockStorageProvider } from './MockStorageProvider';
 import { LocalCompanionStorageProvider } from './LocalCompanionStorageProvider';
+import { TelegramMTProtoStorageProvider } from './TelegramMTProtoStorageProvider';
 
 class StorageProviderRegistry {
   private providers: Map<StorageProviderType, IStorageProvider> = new Map();
@@ -9,9 +10,11 @@ class StorageProviderRegistry {
   constructor() {
     const mock = new MockStorageProvider();
     const companion = new LocalCompanionStorageProvider();
+    const mtproto = new TelegramMTProtoStorageProvider();
 
     this.providers.set('mock', mock);
     this.providers.set('local_companion', companion);
+    this.providers.set('telegram', mtproto);
 
     const configured = import.meta.env.VITE_DEFAULT_STORAGE_PROVIDER as StorageProviderType;
     if (configured && this.providers.has(configured)) {
@@ -43,3 +46,4 @@ class StorageProviderRegistry {
 }
 
 export const storageRegistry = new StorageProviderRegistry();
+export { MockStorageProvider, LocalCompanionStorageProvider, TelegramMTProtoStorageProvider };
