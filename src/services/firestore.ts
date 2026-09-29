@@ -11,10 +11,11 @@ import {
   orderBy
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured } from './firebase';
-import { FileMetadata, FolderMetadata, NavSection } from '../types';
+import { FileMetadata, FolderMetadata, NavSection, OrphanedTelegramObject } from '../types';
 
-const LOCAL_FILES_KEY = 'teledrive_local_files';
-const LOCAL_FOLDERS_KEY = 'teledrive_local_folders';
+const LOCAL_FILES_KEY = 'teledrive_user_files';
+const LOCAL_FOLDERS_KEY = 'teledrive_user_folders';
+const LOCAL_ORPHANS_KEY = 'teledrive_orphaned_telegram_objects';
 
 // Initial starter folders for demo sandbox mode
 const DEFAULT_DEMO_FOLDERS: FolderMetadata[] = [
@@ -23,33 +24,39 @@ const DEFAULT_DEMO_FOLDERS: FolderMetadata[] = [
     name: 'Personal Documents',
     parentId: null,
     color: '#6366f1',
-    isFavorite: true,
-    isTrash: false,
+    favorite: true,
+    trashed: false,
     createdAt: Date.now() - 86400000 * 5,
     updatedAt: Date.now() - 86400000 * 2,
-    ownerUid: 'demo_user_001'
+    ownerUid: 'demo_user_001',
+    isFavorite: true,
+    isTrash: false
   },
   {
     id: 'folder_media',
     name: 'Telegram Media Vault',
     parentId: null,
     color: '#06b6d4',
-    isFavorite: false,
-    isTrash: false,
+    favorite: false,
+    trashed: false,
     createdAt: Date.now() - 86400000 * 10,
     updatedAt: Date.now() - 86400000 * 3,
-    ownerUid: 'demo_user_001'
+    ownerUid: 'demo_user_001',
+    isFavorite: false,
+    isTrash: false
   },
   {
     id: 'folder_archive',
     name: 'Encrypted Backups',
     parentId: null,
     color: '#10b981',
-    isFavorite: false,
-    isTrash: false,
+    favorite: false,
+    trashed: false,
     createdAt: Date.now() - 86400000 * 15,
     updatedAt: Date.now() - 86400000 * 7,
-    ownerUid: 'demo_user_001'
+    ownerUid: 'demo_user_001',
+    isFavorite: false,
+    isTrash: false
   }
 ];
 
@@ -59,62 +66,56 @@ const DEFAULT_DEMO_FILES: FileMetadata[] = [
     id: 'file_welcome_guide',
     name: 'Welcome to TeleDrive.pdf',
     originalSize: 425984,
+    encryptedSize: 426033,
     mimeType: 'application/pdf',
     sha256: '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8',
     folderId: null,
-    telegramChatId: 'channel_tg_teledrive',
+    telegramChatId: '-1003912147144',
     telegramMessageId: 1042,
-    telegramFileId: 'BQACAgIAAxkBAAIB...',
-    encryptionVersion: 0,
+    telegramDocumentId: '6188123128422474381',
+    telegramFileId: '1042',
+    encrypted: true,
+    encryptionVersion: 1,
     status: 'completed',
     storageProvider: 'mock',
-    isFavorite: true,
-    isTrash: false,
+    favorite: true,
+    trashed: false,
+    deletedAt: null,
     createdAt: Date.now() - 86400000 * 2,
     updatedAt: Date.now() - 86400000 * 2,
-    ownerUid: 'demo_user_001'
+    ownerUid: 'demo_user_001',
+    isFavorite: true,
+    isTrash: false
   },
   {
     id: 'file_spec_overview',
     name: 'Zero-Cost Cloud Architecture.md',
     originalSize: 84920,
+    encryptedSize: 84969,
     mimeType: 'text/markdown',
-    sha256: 'd8e8fca2dc0f896fd7cb4cb0031ba249',
+    sha256: 'd8e8fca2dc0f896fd7cb4cb0031ba249f05a9ec8bbd52e6d87b3241ae50ef916',
     folderId: 'folder_documents',
-    telegramChatId: 'channel_tg_teledrive',
+    telegramChatId: '-1003912147144',
     telegramMessageId: 1043,
-    telegramFileId: 'BQACAgIAAxkBAAIC...',
+    telegramDocumentId: '6188123128422474382',
+    telegramFileId: '1043',
+    encrypted: true,
     encryptionVersion: 1,
     status: 'completed',
     storageProvider: 'mock',
-    isFavorite: true,
-    isTrash: false,
+    favorite: true,
+    trashed: false,
+    deletedAt: null,
     createdAt: Date.now() - 86400000 * 3,
     updatedAt: Date.now() - 86400000 * 1,
-    ownerUid: 'demo_user_001'
-  },
-  {
-    id: 'file_sample_archive',
-    name: 'LargeBackup_v1.tar.gz',
-    originalSize: 154829104,
-    mimeType: 'application/gzip',
-    sha256: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
-    folderId: 'folder_archive',
-    telegramChatId: 'channel_tg_teledrive',
-    telegramMessageId: 1044,
-    telegramFileId: 'BQACAgIAAxkBAAID...',
-    encryptionVersion: 1,
-    status: 'completed',
-    storageProvider: 'mock',
-    isFavorite: false,
-    isTrash: false,
-    createdAt: Date.now() - 86400000 * 8,
-    updatedAt: Date.now() - 86400000 * 8,
-    ownerUid: 'demo_user_001'
+    ownerUid: 'demo_user_001',
+    isFavorite: true,
+    isTrash: false
   }
 ];
 
-class MetadataStore {
+class UserScopedFirestoreStore {
+  // --- Local Fallback Cache for Sandbox / Development ---
   private getLocalFolders(): FolderMetadata[] {
     const raw = localStorage.getItem(LOCAL_FOLDERS_KEY);
     if (!raw) {
@@ -149,85 +150,126 @@ class MetadataStore {
     localStorage.setItem(LOCAL_FILES_KEY, JSON.stringify(files));
   }
 
-  // --- Folders ---
+  // --- Folders: users/{ownerUid}/folders/{folderId} ---
   public async getFolders(ownerUid: string, parentId: string | null): Promise<FolderMetadata[]> {
     if (isFirebaseConfigured && db) {
       try {
+        const foldersCol = collection(db, 'users', ownerUid, 'folders');
         const q = query(
-          collection(db, 'folders'),
-          where('ownerUid', '==', ownerUid),
+          foldersCol,
           where('parentId', '==', parentId),
-          where('isTrash', '==', false)
+          where('trashed', '==', false)
         );
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => doc.data() as FolderMetadata);
+        return snapshot.docs.map(doc => {
+          const data = doc.data() as FolderMetadata;
+          return {
+            ...data,
+            isFavorite: data.favorite ?? data.isFavorite ?? false,
+            isTrash: data.trashed ?? data.isTrash ?? false
+          };
+        });
       } catch (err) {
-        console.warn('Firestore fetch failed, reading local cache', err);
+        console.warn('Firestore getFolders failed, reading local cache:', err);
       }
     }
 
     const folders = this.getLocalFolders();
-    return folders.filter(
-      f => (f.ownerUid === ownerUid || f.ownerUid === 'demo_user_001') &&
-           f.parentId === parentId &&
-           !f.isTrash
-    );
+    return folders
+      .filter(f => (f.ownerUid === ownerUid || f.ownerUid === 'demo_user_001') &&
+                   f.parentId === parentId &&
+                   !f.trashed)
+      .map(f => ({ ...f, isFavorite: f.favorite, isTrash: f.trashed }));
   }
 
-  public async getFolderById(folderId: string): Promise<FolderMetadata | null> {
+  public async getFolderById(ownerUid: string, folderId: string): Promise<FolderMetadata | null> {
     if (isFirebaseConfigured && db) {
       try {
-        const docRef = doc(db, 'folders', folderId);
+        const docRef = doc(db, 'users', ownerUid, 'folders', folderId);
         const snapshot = await getDoc(docRef);
-        if (snapshot.exists()) return snapshot.data() as FolderMetadata;
+        if (snapshot.exists()) {
+          const data = snapshot.data() as FolderMetadata;
+          return {
+            ...data,
+            isFavorite: data.favorite ?? data.isFavorite ?? false,
+            isTrash: data.trashed ?? data.isTrash ?? false
+          };
+        }
       } catch (err) {
-        console.warn('Firestore getFolderById error', err);
+        console.warn('Firestore getFolderById error:', err);
       }
     }
+
     const folders = this.getLocalFolders();
-    return folders.find(f => f.id === folderId) || null;
+    const found = folders.find(f => f.id === folderId);
+    return found ? { ...found, isFavorite: found.favorite, isTrash: found.trashed } : null;
   }
 
   public async createFolder(folder: FolderMetadata): Promise<void> {
+    const normalized: FolderMetadata = {
+      ...folder,
+      favorite: folder.favorite ?? folder.isFavorite ?? false,
+      trashed: folder.trashed ?? folder.isTrash ?? false,
+      isFavorite: folder.favorite ?? folder.isFavorite ?? false,
+      isTrash: folder.trashed ?? folder.isTrash ?? false
+    };
+
     if (isFirebaseConfigured && db) {
       try {
-        await setDoc(doc(db, 'folders', folder.id), folder);
+        const docRef = doc(db, 'users', folder.ownerUid, 'folders', folder.id);
+        await setDoc(docRef, normalized);
         return;
       } catch (err) {
-        console.warn('Firestore createFolder error', err);
+        console.warn('Firestore createFolder error:', err);
       }
     }
 
     const folders = this.getLocalFolders();
-    folders.unshift(folder);
+    folders.unshift(normalized);
     this.saveLocalFolders(folders);
   }
 
-  public async updateFolder(folderId: string, updates: Partial<FolderMetadata>): Promise<void> {
+  public async updateFolder(ownerUid: string, folderId: string, updates: Partial<FolderMetadata>): Promise<void> {
+    const normalized = { ...updates };
+    if ('isFavorite' in updates && !('favorite' in updates)) {
+      normalized.favorite = updates.isFavorite;
+    }
+    if ('isTrash' in updates && !('trashed' in updates)) {
+      normalized.trashed = updates.isTrash;
+    }
+
     if (isFirebaseConfigured && db) {
       try {
-        await updateDoc(doc(db, 'folders', folderId), updates);
+        const docRef = doc(db, 'users', ownerUid, 'folders', folderId);
+        await updateDoc(docRef, { ...normalized, updatedAt: Date.now() });
         return;
       } catch (err) {
-        console.warn('Firestore updateFolder error', err);
+        console.warn('Firestore updateFolder error:', err);
       }
     }
 
     const folders = this.getLocalFolders();
     const idx = folders.findIndex(f => f.id === folderId);
     if (idx !== -1) {
-      folders[idx] = { ...folders[idx], ...updates, updatedAt: Date.now() };
+      folders[idx] = {
+        ...folders[idx],
+        ...normalized,
+        updatedAt: Date.now(),
+        isFavorite: normalized.favorite ?? folders[idx].isFavorite,
+        isTrash: normalized.trashed ?? folders[idx].isTrash
+      };
       this.saveLocalFolders(folders);
     }
   }
 
-  public async deleteFolder(folderId: string): Promise<void> {
+  public async deleteFolder(ownerUid: string, folderId: string): Promise<void> {
     if (isFirebaseConfigured && db) {
       try {
-        await deleteDoc(doc(db, 'folders', folderId));
+        const docRef = doc(db, 'users', ownerUid, 'folders', folderId);
+        await deleteDoc(docRef);
         return;
       } catch (err) {
-        console.warn('Firestore deleteFolder error', err);
+        console.warn('Firestore deleteFolder error:', err);
       }
     }
 
@@ -235,7 +277,7 @@ class MetadataStore {
     this.saveLocalFolders(folders);
   }
 
-  // --- Files ---
+  // --- Files: users/{ownerUid}/files/{fileId} ---
   public async getFiles(
     ownerUid: string,
     folderId: string | null,
@@ -243,103 +285,127 @@ class MetadataStore {
   ): Promise<FileMetadata[]> {
     if (isFirebaseConfigured && db) {
       try {
+        const filesCol = collection(db, 'users', ownerUid, 'files');
         let q;
+
         if (section === 'trash') {
-          q = query(
-            collection(db, 'files'),
-            where('ownerUid', '==', ownerUid),
-            where('isTrash', '==', true)
-          );
+          q = query(filesCol, where('trashed', '==', true));
         } else if (section === 'favorites') {
-          q = query(
-            collection(db, 'files'),
-            where('ownerUid', '==', ownerUid),
-            where('isFavorite', '==', true),
-            where('isTrash', '==', false)
-          );
+          q = query(filesCol, where('favorite', '==', true), where('trashed', '==', false));
         } else if (section === 'recent') {
-          q = query(
-            collection(db, 'files'),
-            where('ownerUid', '==', ownerUid),
-            where('isTrash', '==', false),
-            orderBy('updatedAt', 'desc')
-          );
+          q = query(filesCol, where('trashed', '==', false), orderBy('updatedAt', 'desc'));
         } else {
-          // Regular drive folder
-          q = query(
-            collection(db, 'files'),
-            where('ownerUid', '==', ownerUid),
-            where('folderId', '==', folderId),
-            where('isTrash', '==', false)
-          );
+          q = query(filesCol, where('folderId', '==', folderId), where('trashed', '==', false));
         }
+
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => doc.data() as FileMetadata);
+        return snapshot.docs.map(doc => {
+          const data = doc.data() as FileMetadata;
+          return {
+            ...data,
+            isFavorite: data.favorite ?? data.isFavorite ?? false,
+            isTrash: data.trashed ?? data.isTrash ?? false
+          };
+        });
       } catch (err) {
-        console.warn('Firestore getFiles failed, using local store', err);
+        console.warn('Firestore getFiles failed, using local store:', err);
       }
     }
 
     const files = this.getLocalFiles();
-    return files.filter(f => {
-      const matchOwner = f.ownerUid === ownerUid || f.ownerUid === 'demo_user_001';
-      if (!matchOwner) return false;
+    return files
+      .filter(f => {
+        const matchOwner = f.ownerUid === ownerUid || f.ownerUid === 'demo_user_001';
+        if (!matchOwner) return false;
 
-      if (section === 'trash') {
-        return f.isTrash;
-      }
-      if (f.isTrash) return false;
+        const isTrashed = f.trashed ?? f.isTrash ?? false;
+        const isFav = f.favorite ?? f.isFavorite ?? false;
 
-      if (section === 'favorites') {
-        return f.isFavorite;
-      }
-      if (section === 'recent') {
-        return true;
-      }
-      return f.folderId === folderId;
-    });
+        if (section === 'trash') return isTrashed;
+        if (isTrashed) return false;
+        if (section === 'favorites') return isFav;
+        if (section === 'recent') return true;
+        return f.folderId === folderId;
+      })
+      .map(f => ({
+        ...f,
+        isFavorite: f.favorite ?? f.isFavorite ?? false,
+        isTrash: f.trashed ?? f.isTrash ?? false
+      }));
   }
 
   public async createFileMetadata(file: FileMetadata): Promise<void> {
+    const normalized: FileMetadata = {
+      ...file,
+      encryptedSize: file.encryptedSize || file.originalSize,
+      favorite: file.favorite ?? file.isFavorite ?? false,
+      trashed: file.trashed ?? file.isTrash ?? false,
+      deletedAt: file.deletedAt || null,
+      isFavorite: file.favorite ?? file.isFavorite ?? false,
+      isTrash: file.trashed ?? file.isTrash ?? false
+    };
+
     if (isFirebaseConfigured && db) {
       try {
-        await setDoc(doc(db, 'files', file.id), file);
+        const docRef = doc(db, 'users', file.ownerUid, 'files', file.id);
+        await setDoc(docRef, normalized);
         return;
       } catch (err) {
-        console.warn('Firestore createFileMetadata error', err);
+        console.error('Firestore createFileMetadata failed:', err);
+        throw err; // Rethrow so caller knows metadata creation failed
       }
     }
 
     const files = this.getLocalFiles();
-    files.unshift(file);
+    files.unshift(normalized);
     this.saveLocalFiles(files);
   }
 
-  public async updateFileMetadata(fileId: string, updates: Partial<FileMetadata>): Promise<void> {
+  public async updateFileMetadata(
+    ownerUid: string,
+    fileId: string,
+    updates: Partial<FileMetadata>
+  ): Promise<void> {
+    const normalized: any = { ...updates, updatedAt: Date.now() };
+    if ('isFavorite' in updates && !('favorite' in updates)) {
+      normalized.favorite = updates.isFavorite;
+    }
+    if ('isTrash' in updates && !('trashed' in updates)) {
+      normalized.trashed = updates.isTrash;
+    }
+
     if (isFirebaseConfigured && db) {
       try {
-        await updateDoc(doc(db, 'files', fileId), updates);
+        const docRef = doc(db, 'users', ownerUid, 'files', fileId);
+        await updateDoc(docRef, normalized);
         return;
       } catch (err) {
-        console.warn('Firestore updateFileMetadata error', err);
+        console.warn('Firestore updateFileMetadata error:', err);
       }
     }
 
     const files = this.getLocalFiles();
     const idx = files.findIndex(f => f.id === fileId);
     if (idx !== -1) {
-      files[idx] = { ...files[idx], ...updates, updatedAt: Date.now() };
+      files[idx] = {
+        ...files[idx],
+        ...normalized,
+        isFavorite: normalized.favorite ?? files[idx].isFavorite,
+        isTrash: normalized.trashed ?? files[idx].isTrash
+      };
       this.saveLocalFiles(files);
     }
   }
 
-  public async permanentDeleteFile(fileId: string): Promise<void> {
+  public async permanentDeleteFile(ownerUid: string, fileId: string): Promise<void> {
     if (isFirebaseConfigured && db) {
       try {
-        await deleteDoc(doc(db, 'files', fileId));
+        const docRef = doc(db, 'users', ownerUid, 'files', fileId);
+        await deleteDoc(docRef);
         return;
       } catch (err) {
-        console.warn('Firestore permanentDeleteFile error', err);
+        console.error('Firestore permanentDeleteFile error:', err);
+        throw err;
       }
     }
 
@@ -347,34 +413,59 @@ class MetadataStore {
     this.saveLocalFiles(files);
   }
 
-  /**
-   * Duplicate detection: checks if a file with matching SHA-256 already exists in user's library
-   */
   public async checkDuplicateSha256(ownerUid: string, sha256: string): Promise<FileMetadata | null> {
     if (isFirebaseConfigured && db) {
       try {
+        const filesCol = collection(db, 'users', ownerUid, 'files');
         const q = query(
-          collection(db, 'files'),
-          where('ownerUid', '==', ownerUid),
+          filesCol,
           where('sha256', '==', sha256),
-          where('isTrash', '==', false)
+          where('trashed', '==', false)
         );
         const snapshot = await getDocs(q);
         if (!snapshot.empty) {
-          return snapshot.docs[0].data() as FileMetadata;
+          const data = snapshot.docs[0].data() as FileMetadata;
+          return {
+            ...data,
+            isFavorite: data.favorite ?? data.isFavorite ?? false,
+            isTrash: data.trashed ?? data.isTrash ?? false
+          };
         }
       } catch (err) {
-        console.warn('Firestore duplicate check error', err);
+        console.warn('Firestore duplicate check error:', err);
       }
     }
 
     const files = this.getLocalFiles();
-    return files.find(
+    const found = files.find(
       f => (f.ownerUid === ownerUid || f.ownerUid === 'demo_user_001') &&
            f.sha256 === sha256 &&
-           !f.isTrash
-    ) || null;
+           !f.trashed && !f.isTrash
+    );
+    return found ? { ...found, isFavorite: found.favorite, isTrash: found.trashed } : null;
+  }
+
+  // --- Orphaned Telegram Objects Recovery Log ---
+  public recordOrphanedTelegramObject(orphan: OrphanedTelegramObject): void {
+    try {
+      const raw = localStorage.getItem(LOCAL_ORPHANS_KEY);
+      const list: OrphanedTelegramObject[] = raw ? JSON.parse(raw) : [];
+      list.push(orphan);
+      localStorage.setItem(LOCAL_ORPHANS_KEY, JSON.stringify(list));
+      console.warn('Recorded orphaned Telegram object for recovery:', orphan);
+    } catch (e) {
+      console.error('Failed to log orphaned Telegram object:', e);
+    }
+  }
+
+  public getOrphanedTelegramObjects(): OrphanedTelegramObject[] {
+    try {
+      const raw = localStorage.getItem(LOCAL_ORPHANS_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
   }
 }
 
-export const metadataStore = new MetadataStore();
+export const metadataStore = new UserScopedFirestoreStore();

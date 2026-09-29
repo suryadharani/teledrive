@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // User-scoped data architecture: users/{userId}/...
+    match /users/{userId} {
+      // User can only access their own profile root
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // User-scoped files collection
+      match /files/{fileId} {
+        // Read & Delete: Authenticated owner only
+        allow read, delete: if request.auth != null && request.auth.uid == userId;
+
+        // Create: Authenticated owner, valid fields, matching ownerUid
+        allow create: if request.auth != null
+          && request.auth.uid == userId
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 500
+          && request.resource.data.sha256 is string
+          && request.resource.data.sha256.size() == 64
+          && request.resource.data.originalSize is number
+          && request.resource.data.encrypted is bool
+          && request.resource.data.ownerUid == userId;
+
+        // Update: Authenticated owner only, cannot transfer ownership
+        allow update: if request.auth != null
+          && request.auth.uid == userId
+          && request.resource.data.ownerUid == userId;
+      }
+
+      // User-scoped folders collection
+      match /folders/{folderId} {
+        // Read & Delete: Authenticated owner only
+        allow read, delete: if request.auth != null && request.auth.uid == userId;
+
+        // Create: Authenticated owner, valid name, matching ownerUid
+        allow create: if request.auth != null
+          && request.auth.uid == userId
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 255
+          && request.resource.data.ownerUid == userId;
+
+        // Update: Authenticated owner only, cannot transfer ownership
+        allow update: if request.auth != null
+          && request.auth.uid == userId
+          && request.resource.data.ownerUid == userId;
+      }
+    }
+  }
+}

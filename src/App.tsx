@@ -140,7 +140,7 @@ export function App() {
     }
 
     try {
-      const folder = await metadataStore.getFolderById(folderId);
+      const folder = currentUser ? await metadataStore.getFolderById(currentUser.uid, folderId) : null;
       if (folder) {
         setBreadcrumbs(prev => {
           const existingIdx = prev.findIndex(b => b.id === folderId);
@@ -238,11 +238,17 @@ export function App() {
               mimeType: file.type || 'application/octet-stream',
               sha256: originalSha256,
               folderId: currentFolderId,
+              encryptedSize: duplicate.encryptedSize || duplicate.originalSize,
               telegramChatId: duplicate.telegramChatId,
               telegramMessageId: duplicate.telegramMessageId,
+              telegramDocumentId: duplicate.telegramDocumentId || String(duplicate.telegramMessageId || ''),
               telegramFileId: duplicate.telegramFileId,
+              encrypted: duplicate.encrypted ?? (duplicate.encryptionVersion === 1),
               encryptionVersion: duplicate.encryptionVersion,
               status: 'completed',
+              favorite: false,
+              trashed: false,
+              deletedAt: null,
               storageProvider: duplicate.storageProvider,
               isFavorite: false,
               isTrash: false,
@@ -299,22 +305,28 @@ export function App() {
             abortController.signal
           );
 
-          // Stage 4: Finalize metadata in Firestore
+          // Stage 4: Finalize user-scoped metadata in Firestore
           setUploads(prev => prev.map(u => u.id === uploadId ? { ...u, stage: 'finalizing', progress: 95 } : u));
 
           const newFileMetadata: FileMetadata = {
             id: `file_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
             name: file.name,
             originalSize: file.size,
+            encryptedSize: fileToUpload.size,
             mimeType: file.type || 'application/octet-stream',
             sha256: originalSha256,
             folderId: currentFolderId,
-            telegramChatId: uploadResult.telegramChatId,
-            telegramMessageId: uploadResult.telegramMessageId,
-            telegramFileId: uploadResult.telegramFileId,
+            telegramChatId: uploadResult.telegramChatId || '',
+            telegramMessageId: uploadResult.telegramMessageId || 0,
+            telegramDocumentId: uploadResult.telegramFileId || uploadResult.telegramDocumentId || String(uploadResult.telegramMessageId || ''),
+            telegramFileId: uploadResult.telegramFileId || String(uploadResult.telegramMessageId || ''),
+            encrypted: encryptionVersion === 1,
             encryptionVersion,
             status: 'completed',
             storageProvider: activeProviderId,
+            favorite: false,
+            trashed: false,
+            deletedAt: null,
             isFavorite: false,
             isTrash: false,
             createdAt: Date.now(),
@@ -322,7 +334,22 @@ export function App() {
             ownerUid: currentUser.uid
           };
 
-          await metadataStore.createFileMetadata(newFileMetadata);
+          try {
+            await metadataStore.createFileMetadata(newFileMetadata);
+          } catch (metaErr: any) {
+            // Telegram succeeded, but Firestore write failed -> record orphaned Telegram object
+            metadataStore.recordOrphanedTelegramObject({
+              chatId: uploadResult.telegramChatId || '',
+              messageId: uploadResult.telegramMessageId || 0,
+              documentId: uploadResult.telegramFileId,
+              originalName: file.name,
+              sha256: originalSha256,
+              timestamp: Date.now(),
+              error: metaErr?.message
+            });
+            throw new Error(`Uploaded to Telegram (Msg ID: ${uploadResult.telegramMessageId}), but Firestore metadata creation failed: ${metaErr.message}`);
+          }
+
 
           setUploads(prev => prev.map(u => u.id === uploadId ? { ...u, status: 'completed', progress: 100 } : u));
           addToast(`Uploaded "${file.name}" successfully`, 'success');
@@ -396,35 +423,75 @@ export function App() {
 
   // File Actions: Trash, Restore, Delete
   const handleMoveToTrash = async (file: FileMetadata) => {
-    await metadataStore.updateFileMetadata(file.id, { isTrash: true });
+    if (!currentUser) return;
+    await metadataStore.updateFileMetadata(currentUser.uid, file.id, {
+      trashed: true,
+      isTrash: true,
+      deletedAt: Date.now()
+    });
     setSelectedFileForModal(null);
     addToast(`Moved "${file.name}" to Trash`, 'info');
     loadData();
   };
 
   const handleRestoreFile = async (file: FileMetadata) => {
-    await metadataStore.updateFileMetadata(file.id, { isTrash: false });
+    if (!currentUser) return;
+    await metadataStore.updateFileMetadata(currentUser.uid, file.id, {
+      trashed: false,
+      isTrash: false,
+      deletedAt: null
+    });
     setSelectedFileForModal(null);
     addToast(`Restored "${file.name}"`, 'success');
     loadData();
   };
 
   const handlePermanentDelete = async (file: FileMetadata) => {
+    if (!currentUser) return;
+    addToast(`Deleting "${file.name}" from Telegram storage...`, 'info');
+    
+    // Step 1: Delete from Telegram
     const provider = storageRegistry.getProvider(file.storageProvider) || storageRegistry.getActiveProvider();
-    await provider.deleteFile(file);
-    await metadataStore.permanentDeleteFile(file.id);
-    setSelectedFileForModal(null);
-    addToast(`Permanently deleted "${file.name}"`, 'info');
-    loadData();
+    let telegramDeleted = false;
+    try {
+      telegramDeleted = await provider.deleteFile(file);
+    } catch (e: any) {
+      console.error('Failed to delete Telegram object:', e);
+    }
+
+    if (!telegramDeleted) {
+      addToast(`Telegram deletion failed. Firestore metadata preserved to prevent lost references.`, 'error');
+      return;
+    }
+
+    // Step 2: Delete from Firestore ONLY AFTER Telegram deletion succeeded
+    try {
+      await metadataStore.permanentDeleteFile(currentUser.uid, file.id);
+      setSelectedFileForModal(null);
+      addToast(`Permanently deleted "${file.name}" from Telegram and Firestore`, 'success');
+      loadData();
+    } catch (err: any) {
+      addToast(`Firestore delete failed: ${err.message}`, 'error');
+    }
   };
 
   const handleToggleFavoriteFile = async (file: FileMetadata) => {
-    await metadataStore.updateFileMetadata(file.id, { isFavorite: !file.isFavorite });
+    if (!currentUser) return;
+    const nextFav = !(file.favorite ?? file.isFavorite);
+    await metadataStore.updateFileMetadata(currentUser.uid, file.id, {
+      favorite: nextFav,
+      isFavorite: nextFav
+    });
     loadData();
   };
 
   const handleToggleFavoriteFolder = async (folder: FolderMetadata) => {
-    await metadataStore.updateFolder(folder.id, { isFavorite: !folder.isFavorite });
+    if (!currentUser) return;
+    const nextFav = !(folder.favorite ?? folder.isFavorite);
+    await metadataStore.updateFolder(currentUser.uid, folder.id, {
+      favorite: nextFav,
+      isFavorite: nextFav
+    });
     loadData();
   };
 
@@ -436,6 +503,8 @@ export function App() {
       name,
       parentId: currentFolderId,
       color,
+      favorite: false,
+      trashed: false,
       isFavorite: false,
       isTrash: false,
       createdAt: Date.now(),
