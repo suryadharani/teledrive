@@ -182,7 +182,14 @@ export function App() {
   // Upload Pipeline
   const handleUploadFiles = async (fileList: FileList) => {
     if (!currentUser) {
+      addToast('Please sign in before uploading files', 'info');
       setIsAuthOpen(true);
+      return;
+    }
+
+    if (!sessionVault.isUnlocked()) {
+      addToast('Please unlock your AES-256 Vault first to ensure Zero-Knowledge encryption', 'info');
+      setIsVaultOpen(true);
       return;
     }
 

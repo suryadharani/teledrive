@@ -187,7 +187,7 @@ export const VaultModal: React.FC<VaultModalProps> = ({
               <button type="button" className="btn btn-secondary" onClick={onClose}>
                 Cancel
               </button>
-              <button type="submit" className="btn btn-primary">
+              <button id="vault-unlock-btn" type="submit" className="btn btn-primary">
                 <Lock size={15} />
                 <span>Activate Vault</span>
               </button>

@@ -32,6 +32,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <Search size={18} color="var(--text-dim)" />
         <input
           type="text"
+          id="navbar-search-input"
           className="search-input"
           placeholder="Search by file name, MIME type, or SHA-256..."
           value={searchQuery}
@@ -43,6 +44,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="navbar-actions">
         {/* Zero-Knowledge Vault Pill */}
         <div
+          id="vault-status-pill"
           className="provider-pill"
           style={{
             background: isVaultUnlocked ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 255, 255, 0.04)',
@@ -75,7 +77,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* User Auth Profile */}
         {currentUser ? (
-          <div className="user-profile-badge" onClick={onSignOut} title="Click to sign out">
+          <div id="user-profile-badge"
+            className="user-profile-badge" onClick={onSignOut} title="Click to sign out">
             <div className="user-avatar">
               {currentUser.photoURL ? (
                 <img src={currentUser.photoURL} alt={currentUser.displayName || 'User'} />
@@ -87,14 +90,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>
                 {currentUser.displayName || currentUser.email}
               </span>
-              <span style={{ fontSize: '0.7rem', color: currentUser.isDemo ? '#fbbf24' : '#34d399' }}>
-                {currentUser.isDemo ? 'Demo Mode' : 'Firebase Auth'}
+              <span 
+                style={{ fontSize: '0.7rem', color: currentUser.isDemo ? '#fbbf24' : '#34d399', fontFamily: 'monospace' }}
+                title={`Firebase UID: ${currentUser.uid}`}
+              >
+                {currentUser.isDemo ? 'Demo Mode' : `UID: ${currentUser.uid.substring(0, 8)}...`}
               </span>
             </div>
             <LogOut size={14} style={{ color: 'var(--text-dim)', marginLeft: '4px' }} />
           </div>
         ) : (
-          <button className="btn btn-secondary" onClick={onOpenAuth} style={{ padding: '6px 14px' }}>
+          <button id="btn-sign-in" className="btn btn-secondary" onClick={onOpenAuth} style={{ padding: '6px 14px' }}>
             <UserIcon size={16} />
             <span>Sign In</span>
           </button>

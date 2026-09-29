@@ -37,8 +37,6 @@ export class AuthService {
             isDemo: false
           };
           this.notify(user);
-        } else if (this.demoUser) {
-          this.notify(this.demoUser);
         } else {
           this.notify(null);
         }
@@ -74,15 +72,18 @@ export class AuthService {
   }
 
   public getCurrentUser(): TeleUser | null {
-    if (isFirebaseConfigured && auth?.currentUser) {
-      const u = auth.currentUser;
-      return {
-        uid: u.uid,
-        email: u.email,
-        displayName: u.displayName || u.email?.split('@')[0] || 'User',
-        photoURL: u.photoURL,
-        isDemo: false
-      };
+    if (isFirebaseConfigured) {
+      if (auth?.currentUser) {
+        const u = auth.currentUser;
+        return {
+          uid: u.uid,
+          email: u.email,
+          displayName: u.displayName || u.email?.split('@')[0] || 'User',
+          photoURL: u.photoURL,
+          isDemo: false
+        };
+      }
+      return null;
     }
     return this.demoUser;
   }

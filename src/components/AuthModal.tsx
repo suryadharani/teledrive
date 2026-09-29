@@ -156,6 +156,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               Email Address
             </label>
             <input
+              id="auth-email-input"
               type="email"
               required
               className="input-field"
@@ -170,6 +171,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               Password
             </label>
             <input
+              id="auth-password-input"
               type="password"
               required
               className="input-field"
@@ -180,6 +182,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
 
           <button
+            id="auth-submit-btn"
             type="submit"
             className="btn btn-primary"
             disabled={loading}
@@ -192,6 +195,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {isFirebaseConfigured && (
           <button
             type="button"
+            id="google-signin-btn"
             className="btn btn-secondary"
             onClick={handleGoogleSignIn}
             disabled={loading}

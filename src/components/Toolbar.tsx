@@ -42,6 +42,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     <div className="toolbar-bar">
       {/* Hidden file inputs */}
       <input
+        id="file-upload-input"
         ref={fileInputRef}
         type="file"
         multiple
@@ -60,7 +61,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       />
 
       <div className="action-buttons-group">
-        <button className="btn btn-primary" onClick={() => fileInputRef.current?.click()}>
+        <button id="btn-upload-files" className="btn btn-primary" onClick={() => fileInputRef.current?.click()}>
           <Upload size={16} />
           <span>Upload Files</span>
         </button>
@@ -70,7 +71,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <span>Upload Folder</span>
         </button>
 
-        <button className="btn btn-secondary" onClick={onOpenNewFolder}>
+        <button id="btn-new-folder" className="btn btn-secondary" onClick={onOpenNewFolder}>
           <FolderPlus size={16} />
           <span>New Folder</span>
         </button>
@@ -81,6 +82,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <ArrowUpDown size={14} color="var(--text-dim)" />
           <select
+            id="sort-select"
             className="input-field"
             style={{ padding: '6px 10px', fontSize: '0.8rem', width: 'auto', background: 'rgba(255,255,255,0.05)' }}
             value={sortField}
@@ -96,6 +98,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {/* Grid / List View Toggle */}
         <div style={{ display: 'flex', gap: '4px' }}>
           <button
+            id="btn-view-grid"
             className={`btn-icon ${viewMode === 'grid' ? 'active' : ''}`}
             onClick={() => onToggleViewMode('grid')}
             title="Grid View"
@@ -103,6 +106,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <LayoutGrid size={18} />
           </button>
           <button
+            id="btn-view-list"
             className={`btn-icon ${viewMode === 'list' ? 'active' : ''}`}
             onClick={() => onToggleViewMode('list')}
             title="List View"

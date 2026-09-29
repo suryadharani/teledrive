@@ -57,6 +57,7 @@ export const NewFolderModal: React.FC<NewFolderModalProps> = ({
             <input
               type="text"
               autoFocus
+              id="new-folder-name-input"
               className="input-field"
               placeholder="e.g. Invoices, Project Media"
               value={folderName}
@@ -84,7 +85,7 @@ export const NewFolderModal: React.FC<NewFolderModalProps> = ({
             <button type="button" className="btn btn-secondary" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary" disabled={!folderName.trim()}>
+            <button id="new-folder-submit-btn" type="submit" className="btn btn-primary" disabled={!folderName.trim()}>
               Create Folder
             </button>
           </div>
