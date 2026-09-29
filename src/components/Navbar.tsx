@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, ShieldAlert, CheckCircle, User as UserIcon, LogOut, Sliders } from 'lucide-react';
+import { Search, User as UserIcon, LogOut, Sliders, Lock, Unlock } from 'lucide-react';
 import { TeleUser, StorageProviderType } from '../types';
 
 interface NavbarProps {
@@ -7,6 +7,8 @@ interface NavbarProps {
   onSearchChange: (query: string) => void;
   currentUser: TeleUser | null;
   activeProviderId: StorageProviderType;
+  isVaultUnlocked: boolean;
+  onOpenVault: () => void;
   onOpenSettings: () => void;
   onOpenAuth: () => void;
   onSignOut: () => void;
@@ -17,6 +19,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSearchChange,
   currentUser,
   activeProviderId,
+  isVaultUnlocked,
+  onOpenVault,
   onOpenSettings,
   onOpenAuth,
   onSignOut
@@ -37,6 +41,21 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Actions */}
       <div className="navbar-actions">
+        {/* Zero-Knowledge Vault Pill */}
+        <div
+          className="provider-pill"
+          style={{
+            background: isVaultUnlocked ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 255, 255, 0.04)',
+            color: isVaultUnlocked ? '#34d399' : 'var(--text-muted)',
+            borderColor: isVaultUnlocked ? 'rgba(16, 185, 129, 0.3)' : 'var(--border-subtle)'
+          }}
+          onClick={onOpenVault}
+          title={isVaultUnlocked ? "Zero-Knowledge AES-256-GCM Vault is Active" : "Click to unlock Zero-Knowledge Encryption"}
+        >
+          {isVaultUnlocked ? <Lock size={13} color="#10b981" /> : <Unlock size={13} />}
+          <span>{isVaultUnlocked ? 'AES-256 Vault Active' : 'Vault Locked'}</span>
+        </div>
+
         {/* Storage Provider Status Pill */}
         <div
           className={`provider-pill ${activeProviderId}`}
@@ -45,7 +64,11 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           <div className="provider-dot" />
           <span>
-            {activeProviderId === 'mock' ? 'Dev Mock Backend' : activeProviderId === 'telegram' ? 'Telegram MTProto' : 'Local TG Companion'}
+            {activeProviderId === 'mock'
+              ? 'Dev Mock Backend'
+              : activeProviderId === 'telegram'
+              ? 'Telegram MTProto'
+              : 'Local TG Companion'}
           </span>
           <Sliders size={12} style={{ opacity: 0.7 }} />
         </div>

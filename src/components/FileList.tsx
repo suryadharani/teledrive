@@ -10,7 +10,8 @@ import {
   File,
   Star,
   ShieldCheck,
-  MoreVertical
+  MoreVertical,
+  Lock
 } from 'lucide-react';
 import { FileMetadata, FolderMetadata } from '../types';
 
@@ -119,7 +120,10 @@ export const FileList: React.FC<FileListProps> = ({
               <td>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-main)' }}>
                   <File size={18} color="#94a3b8" />
-                  <span style={{ fontWeight: 500 }}>{file.name}</span>
+                  <span style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {file.encryptionVersion === 1 && <span title="Encrypted with AES-256-GCM" style={{ display: 'inline-flex' }}><Lock size={14} color="#10b981" /></span>}
+                    {file.name}
+                  </span>
                 </div>
               </td>
               <td>{formatBytes(file.originalSize)}</td>

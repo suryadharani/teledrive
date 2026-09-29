@@ -16,6 +16,8 @@ import { metadataStore } from './services/firestore';
 import { storageRegistry } from './services/storage';
 import { computeFileSHA256 } from './services/hasher';
 import { isFirebaseConfigured } from './services/firebase';
+import { ZeroKnowledgeCrypto, sessionVault } from './services/crypto';
+import { VaultModal } from './components/VaultModal';
 
 import { Sidebar } from './components/Sidebar';
 import { Navbar } from './components/Navbar';
@@ -64,6 +66,8 @@ export function App() {
   const [selectedFileForModal, setSelectedFileForModal] = useState<FileMetadata | null>(null);
   const [isNewFolderOpen, setIsNewFolderOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isVaultOpen, setIsVaultOpen] = useState(false);
+  const [isVaultUnlocked, setIsVaultUnlocked] = useState(() => sessionVault.isUnlocked());
 
   // Storage Provider
   const [activeProviderId, setActiveProviderId] = useState<StorageProviderType>(
@@ -91,7 +95,10 @@ export function App() {
     const unsub = authService.onAuthStateChanged(user => {
       setCurrentUser(user);
     });
-    return unsub;
+    const unsubVault = sessionVault.subscribe(unlocked => {
+      setIsVaultUnlocked(unlocked);
+    });
+    return () => { unsub(); unsubVault(); };
   }, []);
 
   // Fetch folders and files
@@ -203,11 +210,11 @@ export function App() {
       // Execute upload pipeline asynchronously
       (async () => {
         try {
-          // Stage 1: Chunked Streaming SHA-256 Hashing
-          const sha256 = await computeFileSHA256(
+          // Stage 1: Chunked Streaming SHA-256 Hashing of ORIGINAL Plaintext
+          const originalSha256 = await computeFileSHA256(
             file,
             (percent) => {
-              setUploads(prev => prev.map(u => u.id === uploadId ? { ...u, progress: Math.round(percent * 0.25) } : u));
+              setUploads(prev => prev.map(u => u.id === uploadId ? { ...u, progress: Math.round(percent * 0.2) } : u));
             },
             2 * 1024 * 1024,
             abortController.signal
@@ -215,23 +222,21 @@ export function App() {
 
           setUploads(prev => prev.map(u => u.id === uploadId ? {
             ...u,
-            sha256,
-            stage: 'uploading',
-            progress: 25
+            sha256: originalSha256,
+            progress: 20
           } : u));
 
           // Deduplication Check
-          const duplicate = await metadataStore.checkDuplicateSha256(currentUser.uid, sha256);
+          const duplicate = await metadataStore.checkDuplicateSha256(currentUser.uid, originalSha256);
           if (duplicate) {
             addToast(`Identical file "${duplicate.name}" found. Deduplicating instantly via SHA-256!`, 'info');
 
-            // Link existing file record to current folder without uploading bytes again!
             const deduplicatedFile: FileMetadata = {
               id: `file_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
               name: file.name,
               originalSize: file.size,
               mimeType: file.type || 'application/octet-stream',
-              sha256,
+              sha256: originalSha256,
               folderId: currentFolderId,
               telegramChatId: duplicate.telegramChatId,
               telegramMessageId: duplicate.telegramMessageId,
@@ -252,12 +257,37 @@ export function App() {
             return;
           }
 
-          // Stage 2: Transfer via active Storage Provider
+          // Stage 2: Client-Side Zero-Knowledge Encryption (if Vault Unlocked)
+          let fileToUpload: File = file;
+          let encryptionVersion = 0;
+          const vaultPassphrase = sessionVault.getPassphrase();
+
+          if (vaultPassphrase) {
+            setUploads(prev => prev.map(u => u.id === uploadId ? { ...u, stage: 'hashing', progress: 25 } : u));
+            
+            const encResult = await ZeroKnowledgeCrypto.encryptFileEnvelope(
+              file,
+              vaultPassphrase,
+              (encPercent) => {
+                setUploads(prev => prev.map(u => u.id === uploadId ? { ...u, progress: 20 + Math.round(encPercent * 0.15) } : u));
+              }
+            );
+
+            fileToUpload = new File([encResult.encryptedBlob], `${file.name}.tenc`, {
+              type: 'application/octet-stream'
+            });
+            encryptionVersion = 1;
+            addToast(`Encrypted "${file.name}" with AES-256-GCM before transfer`, 'info');
+          }
+
+          // Stage 3: Transfer to Telegram (Plaintext NEVER leaves browser if encrypted)
+          setUploads(prev => prev.map(u => u.id === uploadId ? { ...u, stage: 'uploading', progress: 35 } : u));
+
           const uploadResult = await provider.uploadFile(
-            file,
-            { sha256, folderId: currentFolderId, encryptionVersion: 0 },
+            fileToUpload,
+            { sha256: originalSha256, folderId: currentFolderId, encryptionVersion },
             (progress) => {
-              const overallPercent = 25 + Math.round(progress.percent * 0.7);
+              const overallPercent = 35 + Math.round(progress.percent * 0.6);
               setUploads(prev => prev.map(u => u.id === uploadId ? {
                 ...u,
                 progress: overallPercent,
@@ -269,7 +299,7 @@ export function App() {
             abortController.signal
           );
 
-          // Stage 3: Finalize metadata in Firestore
+          // Stage 4: Finalize metadata in Firestore
           setUploads(prev => prev.map(u => u.id === uploadId ? { ...u, stage: 'finalizing', progress: 95 } : u));
 
           const newFileMetadata: FileMetadata = {
@@ -277,12 +307,12 @@ export function App() {
             name: file.name,
             originalSize: file.size,
             mimeType: file.type || 'application/octet-stream',
-            sha256,
+            sha256: originalSha256,
             folderId: currentFolderId,
             telegramChatId: uploadResult.telegramChatId,
             telegramMessageId: uploadResult.telegramMessageId,
             telegramFileId: uploadResult.telegramFileId,
-            encryptionVersion: 0,
+            encryptionVersion,
             status: 'completed',
             storageProvider: activeProviderId,
             isFavorite: false,
@@ -325,7 +355,30 @@ export function App() {
     addToast(`Preparing download for "${file.name}"...`, 'info');
     try {
       const provider = storageRegistry.getProvider(file.storageProvider) || storageRegistry.getActiveProvider();
-      const blob = await provider.downloadFile(file);
+      let blob = await provider.downloadFile(file);
+
+      // Decrypt if file was encrypted with AES-256-GCM
+      if (file.encryptionVersion === 1) {
+        const passphrase = sessionVault.getPassphrase();
+        if (!passphrase) {
+          setIsVaultOpen(true);
+          addToast('Please enter your Vault passphrase to decrypt this file', 'info');
+          return;
+        }
+
+        addToast(`Decrypting "${file.name}" with AES-256-GCM...`, 'info');
+        blob = await ZeroKnowledgeCrypto.decryptFileEnvelope(blob, passphrase, file.mimeType);
+
+        // Verify SHA-256 of decrypted file against original SHA-256
+        const decryptedFile = new File([blob], file.name, { type: file.mimeType });
+        const decryptedSha256 = await computeFileSHA256(decryptedFile);
+
+        if (decryptedSha256 !== file.sha256) {
+          throw new Error('Integrity verification failed: Decrypted file checksum mismatch!');
+        }
+        addToast(`Decrypted & verified identical SHA-256 for "${file.name}"!`, 'success');
+      }
+
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -478,6 +531,8 @@ export function App() {
           onSearchChange={setSearchQuery}
           currentUser={currentUser}
           activeProviderId={activeProviderId}
+          isVaultUnlocked={isVaultUnlocked}
+          onOpenVault={() => setIsVaultOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenAuth={() => setIsAuthOpen(true)}
           onSignOut={() => authService.signOut()}
@@ -577,6 +632,12 @@ export function App() {
         onClose={() => setIsSettingsOpen(false)}
         activeProviderId={activeProviderId}
         onSelectProvider={handleSelectProvider}
+      />
+
+      <VaultModal
+        isOpen={isVaultOpen}
+        onClose={() => setIsVaultOpen(false)}
+        onUnlocked={() => addToast('Encryption Vault unlocked! Files will be encrypted with AES-256-GCM.', 'success')}
       />
 
       <AuthModal

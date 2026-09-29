@@ -9,7 +9,8 @@ import {
   Key,
   HardDrive,
   FileText,
-  RotateCcw
+  RotateCcw,
+  Lock
 } from 'lucide-react';
 import { FileMetadata } from '../types';
 
@@ -84,8 +85,9 @@ export const FileActionModal: React.FC<FileActionModalProps> = ({
 
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
             <span style={{ color: 'var(--text-dim)' }}>Encryption</span>
-            <span>
-              {file.encryptionVersion === 0 ? 'Plaintext (v0)' : 'Client-Side AES-256-GCM (v1)'}
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: file.encryptionVersion === 1 ? '#34d399' : 'var(--text-muted)' }}>
+              {file.encryptionVersion === 1 && <Lock size={14} color='#10b981' />}
+              <strong>{file.encryptionVersion === 1 ? 'Zero-Knowledge AES-256-GCM (v1)' : 'Plaintext (v0)'}</strong>
             </span>
           </div>
 

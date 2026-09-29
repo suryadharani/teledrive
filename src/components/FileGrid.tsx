@@ -12,7 +12,8 @@ import {
   MoreVertical,
   CheckCircle,
   ShieldCheck,
-  AlertCircle
+  AlertCircle,
+  Lock
 } from 'lucide-react';
 import { FileMetadata, FolderMetadata } from '../types';
 
@@ -145,7 +146,10 @@ export const FileGrid: React.FC<FileGridProps> = ({
                 </div>
 
                 <div className="file-card-body">
-                  <div className="file-name" title={file.name}>{file.name}</div>
+                  <div className="file-name" title={file.name} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {file.encryptionVersion === 1 && <span title="Encrypted with AES-256-GCM" style={{ display: 'inline-flex' }}><Lock size={13} color="#10b981" /></span>}
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{file.name}</span>
+                  </div>
 
                   <div className="file-details-row">
                     <span>{formatBytes(file.originalSize)}</span>
